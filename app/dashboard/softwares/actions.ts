@@ -68,6 +68,26 @@ async function getOwnedSoftware(id: string, session: DashboardSession) {
   return { software, error: null };
 }
 
+async function revalidateCategoryPaths(subcategoryId: string | null) {
+  revalidatePath("/categories");
+  if (!subcategoryId) return;
+
+  const subcategory = await prisma.subcategory.findUnique({
+    where: { id: subcategoryId },
+    select: { slug: true, category: { select: { slug: true } } },
+  });
+  if (!subcategory) return;
+
+  const catSlug = subcategory.category.slug;
+  const subSlug = subcategory.slug;
+  revalidatePath(`/categories/${catSlug}`);
+  revalidatePath(`/categories/${catSlug}/page/2`);
+  revalidatePath(`/categories/${catSlug}/page/3`);
+  revalidatePath(`/categories/${catSlug}/${subSlug}`);
+  revalidatePath(`/categories/${catSlug}/${subSlug}/page/2`);
+  revalidatePath(`/categories/${catSlug}/${subSlug}/page/3`);
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
@@ -263,6 +283,7 @@ export async function createSoftware(formData: FormData) {
 
     revalidateTag("softwares");
     revalidatePath("/");
+    await revalidateCategoryPaths(subcategoryId);
     return { success: true, data: software };
   } catch (error) {
     console.error("Error creating software:", error);
@@ -297,6 +318,7 @@ export async function updateSoftware(id: string, formData: FormData) {
 
     const access = await getOwnedSoftware(id, session);
     if (access.error) return { success: false, error: access.error };
+    const oldSubcategoryId = access.software!.subcategoryId;
 
     const name = formData.get("name") as string;
     const subcategoryId = (formData.get("subcategoryId") as string) || null;
@@ -369,6 +391,10 @@ export async function updateSoftware(id: string, formData: FormData) {
 
     revalidateTag("softwares");
     revalidatePath("/");
+    await revalidateCategoryPaths(oldSubcategoryId);
+    if (subcategoryId !== oldSubcategoryId) {
+      await revalidateCategoryPaths(subcategoryId);
+    }
     return { success: true, data: software };
   } catch (error) {
     console.error("Error updating software:", error);
@@ -402,6 +428,7 @@ export async function deleteSoftware(id: string) {
     await prisma.software.delete({ where: { id } });
     revalidateTag("softwares");
     revalidatePath("/");
+    await revalidateCategoryPaths(software.subcategoryId);
     return { success: true };
   } catch (error) {
     console.error("Error deleting software:", error);
@@ -432,6 +459,10 @@ export async function deleteSoftwares(ids: string[]) {
     const result = await prisma.software.deleteMany({ where: { id: { in: ids } } });
     revalidateTag("softwares");
     revalidatePath("/");
+    const uniqueSubcategoryIds = [...new Set(softwares.map((s) => s.subcategoryId))];
+    for (const subId of uniqueSubcategoryIds) {
+      await revalidateCategoryPaths(subId);
+    }
     return { success: true, data: { count: result.count } };
   } catch (error) {
     console.error("Error deleting softwares:", error);
@@ -564,6 +595,7 @@ async function runCsvImportJob(jobId: string, rows: CsvRow[]) {
 
   const existing = await prisma.software.findMany({ select: { slug: true } });
   const existingSlugs = new Set(existing.map((r) => r.slug));
+  const touchedSubcategoryIds = new Set<string>();
 
   await runWithConcurrency(rows, 6, async (row) => {
     try {
@@ -580,6 +612,8 @@ async function runCsvImportJob(jobId: string, rows: CsvRow[]) {
       const subcategoryId = await resolveSubcategoryId(row.category, row.subcategory);
       if (!subcategoryId) {
         state.uncategorized = (state.uncategorized ?? 0) + 1;
+      } else {
+        touchedSubcategoryIds.add(subcategoryId);
       }
 
       const pictureUrls: string[] = [];
@@ -625,6 +659,11 @@ async function runCsvImportJob(jobId: string, rows: CsvRow[]) {
   });
 
   state.done = true;
+  if (touchedSubcategoryIds.size > 0) {
+    await Promise.all([...touchedSubcategoryIds].map((subId) => revalidateCategoryPaths(subId)));
+  } else {
+    revalidatePath("/categories");
+  }
   // Let the client pick up the final "done" state, then free the entry.
   setTimeout(() => importJobs.delete(jobId), 60 * 60 * 1000);
 }
