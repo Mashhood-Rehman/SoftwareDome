@@ -40,9 +40,22 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  if (pathname.startsWith("/categories/") && !pathname.includes("/page/")) {
+    const pageParam = request.nextUrl.searchParams.get("page");
+    const q = request.nextUrl.searchParams.get("q");
+    const pageNum = pageParam ? parseInt(pageParam, 10) : 1;
+
+    if (!q && pageNum > 1) {
+      const url = request.nextUrl.clone();
+      url.pathname = `${pathname}/page/${pageNum}`;
+      url.searchParams.delete("page");
+      return NextResponse.redirect(url, 301);
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/categories/:path*"],
 };
