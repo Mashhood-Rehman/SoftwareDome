@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cache, Suspense } from "react";
+import { cache } from "react";
 import Footer from "@/components/Footer";
 import Container from "@/components/Container";
 import SiteHeader from "@/components/SiteHeader";
@@ -7,16 +7,6 @@ import { ArrowLeft, Filter } from "@/lib/fa-icons";
 import { getSoftwaresByCategory, getCategoryWithSubcategories } from "@/app/categories/actions";
 import { PAGE_SIZE, STATIC_PAGE_LIMIT } from "@/app/categories/constants";
 import CategoryListingClient from "./CategoryListingClient";
-
-function CategoryListingSkeleton() {
-  return (
-    <div className="space-y-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="h-36 animate-pulse rounded-2xl border border-zinc-100 bg-zinc-50" />
-      ))}
-    </div>
-  );
-}
 
 export const loadCategoryPage = cache(async (categorySlug: string, page: number) => {
   const [listingRes, detailRes] = await Promise.all([
@@ -98,18 +88,16 @@ export default async function CategoryPageContent({
             </aside>
 
             <div>
-              <Suspense fallback={<CategoryListingSkeleton />}>
-                <CategoryListingClient
-                  categorySlug={categorySlug}
-                  page={page}
-                  staticPageLimit={staticPageLimit}
-                  initialData={
-                    data
-                      ? { softwares: data.softwares, total: data.total, totalPages: data.totalPages }
-                      : { softwares: [], total: 0, totalPages: 1 }
-                  }
-                />
-              </Suspense>
+              <CategoryListingClient
+                categorySlug={categorySlug}
+                page={page}
+                staticPageLimit={staticPageLimit}
+                initialData={
+                  data
+                    ? { softwares: data.softwares, total: data.total, totalPages: data.totalPages }
+                    : { softwares: [], total: 0, totalPages: 1 }
+                }
+              />
 
               <div className="mt-12 overflow-hidden rounded-2xl bg-primary-navy px-8 py-10 text-center sm:px-12">
                 <h3 className="font-brand text-2xl font-bold text-white">

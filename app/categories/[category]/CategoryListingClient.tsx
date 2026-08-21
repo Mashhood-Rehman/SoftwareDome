@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CategoriesPagination from "@/components/CategoriesPagination";
 import StarRating from "@/components/StarRating";
@@ -42,43 +42,59 @@ export default function CategoryListingClient({
   initialData: ListingData;
 }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const sort = (searchParams.get("sort") as SortValue) || "rating";
-  const q = searchParams.get("q") || "";
-  const requestedPage = parseInt(searchParams.get("page") || "", 10) || page;
 
-  const [loadedKey, setLoadedKey] = useState(`${page}:`);
+  const [sort, setSort] = useState<SortValue>("rating");
+  const [q, setQ] = useState("");
   const [currentPage, setCurrentPage] = useState(page);
   const [data, setData] = useState<ListingData>(initialData);
   const [loading, setLoading] = useState(false);
 
+  const fetchAndApply = useCallback(
+    (targetPage: number, targetQ: string) => {
+      setLoading(true);
+      getSoftwaresByCategory(categorySlug, { page: targetPage, pageSize: PAGE_SIZE, q: targetQ || undefined }).then(
+        (res) => {
+          if (res.success && res.data) setData(res.data as ListingData);
+          setCurrentPage(targetPage);
+          setLoading(false);
+        }
+      );
+    },
+    [categorySlug]
+  );
+
+  // One-time correction on mount: someone may have landed on this exact URL
+  // with ?sort=/?q=/?page= that the static shell (always rendered with the
+  // default view) doesn't reflect yet. Read via a plain browser API, never
+  // Next's useSearchParams — see the note above this code block for why.
   useEffect(() => {
-    const key = `${requestedPage}:${q}`;
-    if (key === loadedKey) return;
-    let cancelled = false;
-    setLoading(true);
-    getSoftwaresByCategory(categorySlug, { page: requestedPage, pageSize: PAGE_SIZE, q: q || undefined }).then(
-      (res) => {
-        if (cancelled) return;
-        if (res.success && res.data) setData(res.data as ListingData);
-        setCurrentPage(requestedPage);
-        setLoadedKey(key);
-        setLoading(false);
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [categorySlug, requestedPage, q, loadedKey]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlSort = (urlParams.get("sort") as SortValue) || "rating";
+    const urlQ = urlParams.get("q") || "";
+    const urlPage = parseInt(urlParams.get("page") || "", 10) || page;
+
+    setSort(urlSort);
+    setQ(urlQ);
+
+    if (urlQ !== "" || urlPage !== page) {
+      fetchAndApply(urlPage, urlQ);
+    }
+    // Deliberately empty deps: this reads the URL exactly once, on mount.
+    // Every change after that is driven by this component's own handlers
+    // below, which already know the new value directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const qSuffix = q ? `&q=${encodeURIComponent(q)}` : "";
 
   const handleSortChange = (newSort: SortValue) => {
+    setSort(newSort);
     router.replace(`/categories/${categorySlug}?sort=${newSort}${qSuffix}`, { scroll: false });
   };
 
   const handlePageChange = (targetPage: number) => {
     router.replace(`/categories/${categorySlug}?sort=${sort}&page=${targetPage}${qSuffix}`, { scroll: false });
+    fetchAndApply(targetPage, q);
   };
 
   const hrefForPage = (targetPage: number): string | null => {
