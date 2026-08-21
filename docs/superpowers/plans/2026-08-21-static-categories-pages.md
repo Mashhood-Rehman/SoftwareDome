@@ -78,6 +78,8 @@ export default function SiteHeader() {
 
 - [ ] **Step 3: Create `components/CategoriesPagination.tsx`**
 
+> **Revised during Task 3's review (see plan-level note before Task 3 below):** `hrefForPage` returns `string | null` and an optional `onPageChange` callback is supported — when `hrefForPage` returns `null` for a given page, a `<button onClick>` is rendered instead of a `<Link>`. This lets a consumer mix static-cached page links with client-side-fetched pages in the same pagination control, which Task 3 needs. Existing/future callers that always return a string and never pass `onPageChange` behave exactly as before.
+
 ```tsx
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "@/lib/fa-icons";
@@ -86,10 +88,12 @@ export default function CategoriesPagination({
   page,
   totalPages,
   hrefForPage,
+  onPageChange,
 }: {
   page: number;
   totalPages: number;
-  hrefForPage: (page: number) => string;
+  hrefForPage: (page: number) => string | null;
+  onPageChange?: (page: number) => void;
 }) {
   if (totalPages <= 1) return null;
 
@@ -103,24 +107,61 @@ export default function CategoriesPagination({
     }
   }
 
+  const arrowClass =
+    "flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50";
+  const disabledArrowClass =
+    "flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-300 opacity-40";
+
+  function renderArrow(target: number, disabled: boolean, ariaLabel: string, icon: React.ReactNode) {
+    if (disabled) {
+      return (
+        <span className={disabledArrowClass} aria-hidden>
+          {icon}
+        </span>
+      );
+    }
+    const href = hrefForPage(target);
+    if (href) {
+      return (
+        <Link href={href} className={arrowClass} aria-label={ariaLabel}>
+          {icon}
+        </Link>
+      );
+    }
+    return (
+      <button onClick={() => onPageChange?.(target)} className={arrowClass} aria-label={ariaLabel}>
+        {icon}
+      </button>
+    );
+  }
+
+  function renderPageNumber(p: number) {
+    const className = `flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold transition-colors ${
+      p === page ? "bg-primary-navy text-white" : "text-zinc-600 hover:bg-zinc-50"
+    }`;
+    const href = hrefForPage(p);
+    if (href) {
+      return (
+        <Link key={p} href={href} className={className} aria-current={p === page ? "page" : undefined}>
+          {p}
+        </Link>
+      );
+    }
+    return (
+      <button
+        key={p}
+        onClick={() => onPageChange?.(p)}
+        className={className}
+        aria-current={p === page ? "page" : undefined}
+      >
+        {p}
+      </button>
+    );
+  }
+
   return (
     <nav className="mt-10 flex items-center justify-center gap-1.5" aria-label="Pagination">
-      {page > 1 ? (
-        <Link
-          href={hrefForPage(page - 1)}
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50"
-          aria-label="Previous page"
-        >
-          <ChevronLeft size={15} />
-        </Link>
-      ) : (
-        <span
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-300 opacity-40"
-          aria-hidden
-        >
-          <ChevronLeft size={15} />
-        </span>
-      )}
+      {renderArrow(page - 1, page <= 1, "Previous page", <ChevronLeft size={15} />)}
 
       {pages.map((p, i) =>
         p === "ellipsis" ? (
@@ -128,35 +169,11 @@ export default function CategoriesPagination({
             …
           </span>
         ) : (
-          <Link
-            key={p}
-            href={hrefForPage(p)}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold transition-colors ${
-              p === page ? "bg-primary-navy text-white" : "text-zinc-600 hover:bg-zinc-50"
-            }`}
-            aria-current={p === page ? "page" : undefined}
-          >
-            {p}
-          </Link>
+          renderPageNumber(p)
         )
       )}
 
-      {page < totalPages ? (
-        <Link
-          href={hrefForPage(page + 1)}
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50"
-          aria-label="Next page"
-        >
-          <ChevronRight size={15} />
-        </Link>
-      ) : (
-        <span
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-300 opacity-40"
-          aria-hidden
-        >
-          <ChevronRight size={15} />
-        </span>
-      )}
+      {renderArrow(page + 1, page >= totalPages, "Next page", <ChevronRight size={15} />)}
     </nav>
   );
 }
@@ -305,18 +322,23 @@ git commit -m "feat: make /categories a static server-rendered page"
 
 Introduces the shared `CategoryPageContent` renderer plus two thin routes: `/categories/[category]` (page 1) and `/categories/[category]/page/[page]` (pages 2–3, and page 4+ rendered on demand). Both call the same content component so there's exactly one place that renders the listing markup.
 
-**Note on the plan vs. the approved spec:** the spec described a client component that fetches live data on sort/search/pagination changes. Looking at the current implementation while writing this task, sort/search/pagination were already pure `router.push` URL navigations (not in-place AJAX swaps) — so the simpler, fully-server-rendered approach below produces identical behavior with less code and zero extra client JS: any request carrying `?sort=` or `?q=` is naturally rendered dynamically by Next (because the Server Component reads `searchParams`), while a plain request to the base path is served from the static cache. This satisfies every requirement in the spec (static default pages 1–3, live search) without a client-side data-fetching layer.
+**Correction (discovered during this task's own review — read before implementing):** an earlier version of this task had `CategoryPageContent` read `searchParams` directly in the Server Component, on the theory that "a request carrying `?sort=`/`?q=` renders dynamically while a plain request is served from the static cache." That theory is wrong for this project: in the Next.js App Router's `prerender-legacy` path (the one active here — this repo has no `cacheComponents`/PPR flag in `next.config.ts`, and the Global Constraints forbid enabling one), reading a Dynamic API such as `searchParams` opts the **entire route** into per-request dynamic rendering — for every request, query string or not — not just the individual request that happens to carry one. That would have meant *no* request to `/categories/[category]` was ever actually served from the static cache, silently defeating this whole task.
+
+The corrected design reverts to the original approved spec (`docs/superpowers/specs/2026-08-21-static-categories-pages-design.md` §3): `CategoryPageContent` takes only `categorySlug` and `page` — it never touches `searchParams`, so it stays genuinely static. A new Client Component, `CategoryListingClient`, owns sort/search/pagination: it reads the URL via the *client-side* `useSearchParams()` hook (this is a different API from the Server Component's `searchParams` prop and does not affect the route's static/dynamic classification, since it only runs post-hydration in the browser), and calls `getSoftwaresByCategory` directly when the URL's `sort`/`q`/`page` deviate from the server-rendered default (sort=rating, no `q`, the page the server already fetched). Plain pagination across the static pages 1–3 in the default view still uses a real `<Link>` (fast, served from the cache, no client fetch at all). `components/CategoriesPagination.tsx` (Task 1) was extended in this plan (see its Step 3, now revised) so `hrefForPage` may return `null` for a page that needs a client-side fetch instead of a static navigation — Task 1 is already merged, so this task also modifies that file.
 
 **Files:**
 - Create: `app/categories/constants.ts`
 - Create: `app/categories/[category]/CategoryPageContent.tsx`
+- Create: `app/categories/[category]/CategoryListingClient.tsx`
+- Modify: `components/CategoriesPagination.tsx` (Task 1's file — apply the revised version from Task 1's Step 3 above, if not already applied)
 - Modify: `app/categories/[category]/page.tsx` (full rewrite)
 - Create: `app/categories/[category]/page/[page]/page.tsx`
 
 **Interfaces:**
 - Produces: `PAGE_SIZE = 12`, `STATIC_PAGE_LIMIT = 3` from `app/categories/constants.ts` — consumed by Task 4 too.
-- Produces: `loadCategoryPage(categorySlug: string, page: number, q: string): Promise<{ listing: any; detail: any }>` (React `cache()`-wrapped) and `CategoryPageContent({ categorySlug, page, sort?, q? })` default export from `app/categories/[category]/CategoryPageContent.tsx` — consumed by both route files in this task.
-- Consumes: `getSoftwaresByCategory`, `getCategoryWithSubcategories` from `app/categories/actions.ts` (unchanged); `StarRating`, `SiteHeader`, `CategoriesPagination` from Task 1.
+- Produces: `loadCategoryPage(categorySlug: string, page: number): Promise<{ listing: any; detail: any }>` (React `cache()`-wrapped, no `q` parameter — the static fetch is always the default view) and `CategoryPageContent({ categorySlug, page })` default export from `app/categories/[category]/CategoryPageContent.tsx` — consumed by both route files in this task.
+- Produces: `CategoryListingClient({ categorySlug, page, staticPageLimit, initialData })` default export from `app/categories/[category]/CategoryListingClient.tsx` — consumed only by `CategoryPageContent.tsx` in this task.
+- Consumes: `getSoftwaresByCategory`, `getCategoryWithSubcategories` from `app/categories/actions.ts` (unchanged); `StarRating`, `SiteHeader`, `CategoriesPagination` from Task 1 (the revised `CategoriesPagination`).
 
 - [ ] **Step 1: Create `app/categories/constants.ts`**
 
@@ -325,7 +347,9 @@ export const PAGE_SIZE = 12;
 export const STATIC_PAGE_LIMIT = 3;
 ```
 
-- [ ] **Step 2: Create `app/categories/[category]/CategoryPageContent.tsx`**
+- [ ] **Step 2: Apply the revised `components/CategoriesPagination.tsx` from Task 1's Step 3 above** (skip if it's already in that state)
+
+- [ ] **Step 3: Create `app/categories/[category]/CategoryPageContent.tsx`**
 
 ```tsx
 import Link from "next/link";
@@ -333,23 +357,14 @@ import { cache } from "react";
 import Footer from "@/components/Footer";
 import Container from "@/components/Container";
 import SiteHeader from "@/components/SiteHeader";
-import CategoriesPagination from "@/components/CategoriesPagination";
-import StarRating from "@/components/StarRating";
-import { ArrowLeft, Box, Filter, ArrowDownUp, MessageSquare, ArrowUpRight } from "@/lib/fa-icons";
+import { ArrowLeft, Filter } from "@/lib/fa-icons";
 import { getSoftwaresByCategory, getCategoryWithSubcategories } from "@/app/categories/actions";
-import { PAGE_SIZE } from "@/app/categories/constants";
+import { PAGE_SIZE, STATIC_PAGE_LIMIT } from "@/app/categories/constants";
+import CategoryListingClient from "./CategoryListingClient";
 
-const sortOptions = [
-  { value: "rating", label: "Highest rated" },
-  { value: "newest", label: "Newest" },
-  { value: "name", label: "Name (A-Z)" },
-] as const;
-
-type SortValue = (typeof sortOptions)[number]["value"];
-
-export const loadCategoryPage = cache(async (categorySlug: string, page: number, q: string) => {
+export const loadCategoryPage = cache(async (categorySlug: string, page: number) => {
   const [listingRes, detailRes] = await Promise.all([
-    getSoftwaresByCategory(categorySlug, { page, pageSize: PAGE_SIZE, q: q || undefined }),
+    getSoftwaresByCategory(categorySlug, { page, pageSize: PAGE_SIZE }),
     getCategoryWithSubcategories(categorySlug),
   ]);
   return {
@@ -358,42 +373,16 @@ export const loadCategoryPage = cache(async (categorySlug: string, page: number,
   };
 });
 
-function hrefForPage(categorySlug: string, sort: string, q: string, targetPage: number): string {
-  const params = new URLSearchParams();
-  if (sort !== "rating") params.set("sort", sort);
-  if (q) params.set("q", q);
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  const base = `/categories/${categorySlug}`;
-  if (targetPage <= 1) return `${base}${suffix}`;
-  return `${base}/page/${targetPage}${suffix}`;
-}
-
 export default async function CategoryPageContent({
   categorySlug,
   page,
-  sort: sortParam,
-  q,
 }: {
   categorySlug: string;
   page: number;
-  sort?: string;
-  q?: string;
 }) {
-  const sort: SortValue = sortParam === "newest" || sortParam === "name" ? sortParam : "rating";
-  const query = q?.trim() || "";
-  const { listing: data, detail: categoryDetail } = await loadCategoryPage(categorySlug, page, query);
-
+  const { listing: data, detail: categoryDetail } = await loadCategoryPage(categorySlug, page);
   const categoryLabel = data?.categoryName || "Category";
-
-  const sortedSoftwares = data
-    ? query
-      ? data.softwares
-      : [...data.softwares].sort((a: any, b: any) => {
-          if (sort === "name") return (a.name || "").localeCompare(b.name || "");
-          if (sort === "newest") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          return (b.rating || 0) - (a.rating || 0);
-        })
-    : [];
+  const staticPageLimit = data ? Math.min(STATIC_PAGE_LIMIT, data.totalPages) : STATIC_PAGE_LIMIT;
 
   return (
     <main className="min-h-screen bg-zinc-50/40">
@@ -421,14 +410,6 @@ export default async function CategoryPageContent({
               {data.total === 1 ? "" : "s"} and find the right fit for your team.
             </p>
           )}
-          {query && (
-            <p className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
-              Showing results for <span className="text-primary-navy">&ldquo;{query}&rdquo;</span>
-              <Link href={`/categories/${categorySlug}`} className="text-brand-green-dark hover:underline">
-                Clear search
-              </Link>
-            </p>
-          )}
         </Container>
       </section>
 
@@ -437,28 +418,6 @@ export default async function CategoryPageContent({
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-[260px_1fr]">
             <aside className="hidden lg:block">
               <div className="sticky top-24 space-y-6">
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5">
-                  <div className="mb-4 flex items-center gap-2 text-sm font-bold text-primary-navy">
-                    <ArrowDownUp size={14} className="text-brand-green-dark" />
-                    Sort by
-                  </div>
-                  <div className="space-y-1.5">
-                    {sortOptions.map((opt) => (
-                      <Link
-                        key={opt.value}
-                        href={hrefForPage(categorySlug, opt.value, query, 1)}
-                        className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
-                          sort === opt.value
-                            ? "bg-brand-green/10 text-brand-green-dark"
-                            : "text-zinc-600 hover:bg-zinc-50"
-                        }`}
-                      >
-                        {opt.label}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="rounded-2xl border border-zinc-200 bg-white p-5">
                   <div className="mb-4 flex items-center gap-2 text-sm font-bold text-primary-navy">
                     <Filter size={14} className="text-brand-green-dark" />
@@ -483,90 +442,16 @@ export default async function CategoryPageContent({
             </aside>
 
             <div>
-              {!data || sortedSoftwares.length === 0 ? (
-                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-16 text-center">
-                  <Box size={28} className="mb-3 text-zinc-300" />
-                  <h3 className="mb-1 text-base font-bold text-primary-navy">No softwares found</h3>
-                  <p className="max-w-sm text-xs text-zinc-500">
-                    We couldn't find any listings for this category. Browse other categories instead.
-                  </p>
-                  <Link
-                    href="/categories"
-                    className="mt-5 inline-flex items-center justify-center rounded-full bg-brand-green-light px-6 py-2.5 text-sm font-bold text-primary-navy shadow-sm transition-all hover:bg-brand-green hover:text-white"
-                  >
-                    Browse categories
-                  </Link>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-4">
-                    {sortedSoftwares.map((software: any, idx: number) => (
-                      <div
-                        key={software.id}
-                        className="group flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-brand-green/40 hover:shadow-lg sm:flex-row sm:items-center"
-                      >
-                        <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-400 sm:flex">
-                          {(page - 1) * PAGE_SIZE + idx + 1}
-                        </span>
-
-                        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50">
-                          {software.logo ? (
-                            <img
-                              src={software.logo}
-                              alt={software.name}
-                              className="h-full w-full object-contain p-2"
-                            />
-                          ) : (
-                            <span className="text-xl font-black text-primary-navy/25">
-                              {software.name?.charAt(0)}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-base font-bold text-primary-navy transition-colors group-hover:text-brand-green-dark">
-                              {software.name}
-                            </h3>
-                            <StarRating rating={software.rating || 0} />
-                            <span className="text-xs font-bold text-zinc-400">
-                              {(software.rating || 0).toFixed(1)}
-                            </span>
-                          </div>
-                          {software.introduction && (
-                            <p className="mt-1.5 line-clamp-2 max-w-2xl text-sm text-zinc-500">
-                              {software.introduction}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Link
-                            href={`/softwares/${software.slug}#reviews`}
-                            className="hidden items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-500 transition-colors hover:border-primary-navy hover:text-primary-navy sm:flex"
-                          >
-                            <MessageSquare size={13} />
-                            Reviews
-                          </Link>
-                          <Link
-                            href={`/softwares/${software.slug}`}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary-navy px-4 py-2 text-xs font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-green-dark"
-                          >
-                            View Profile
-                            <ArrowUpRight size={13} />
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <CategoriesPagination
-                    page={page}
-                    totalPages={data.totalPages}
-                    hrefForPage={(p) => hrefForPage(categorySlug, sort, query, p)}
-                  />
-                </>
-              )}
+              <CategoryListingClient
+                categorySlug={categorySlug}
+                page={page}
+                staticPageLimit={staticPageLimit}
+                initialData={
+                  data
+                    ? { softwares: data.softwares, total: data.total, totalPages: data.totalPages }
+                    : { softwares: [], total: 0, totalPages: 1 }
+                }
+              />
 
               <div className="mt-12 overflow-hidden rounded-2xl bg-primary-navy px-8 py-10 text-center sm:px-12">
                 <h3 className="font-brand text-2xl font-bold text-white">
@@ -594,7 +479,225 @@ export default async function CategoryPageContent({
 }
 ```
 
-- [ ] **Step 3: Rewrite `app/categories/[category]/page.tsx`**
+- [ ] **Step 4: Create `app/categories/[category]/CategoryListingClient.tsx`**
+
+```tsx
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import CategoriesPagination from "@/components/CategoriesPagination";
+import StarRating from "@/components/StarRating";
+import { Box, ArrowDownUp, MessageSquare, ArrowUpRight } from "@/lib/fa-icons";
+import { getSoftwaresByCategory } from "@/app/categories/actions";
+
+const PAGE_SIZE = 12;
+
+const sortOptions = [
+  { value: "rating", label: "Highest rated" },
+  { value: "newest", label: "Newest" },
+  { value: "name", label: "Name (A-Z)" },
+] as const;
+
+type SortValue = (typeof sortOptions)[number]["value"];
+
+type SoftwareItem = {
+  id: string;
+  name: string;
+  slug: string;
+  logo: string | null;
+  introduction: string | null;
+  rating: number | null;
+  createdAt: string;
+};
+
+type ListingData = { softwares: SoftwareItem[]; total: number; totalPages: number };
+
+export default function CategoryListingClient({
+  categorySlug,
+  page,
+  staticPageLimit,
+  initialData,
+}: {
+  categorySlug: string;
+  page: number;
+  staticPageLimit: number;
+  initialData: ListingData;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sort = (searchParams.get("sort") as SortValue) || "rating";
+  const q = searchParams.get("q") || "";
+  const requestedPage = parseInt(searchParams.get("page") || "", 10) || page;
+
+  const [loadedKey, setLoadedKey] = useState(`${page}:`);
+  const [currentPage, setCurrentPage] = useState(page);
+  const [data, setData] = useState<ListingData>(initialData);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const key = `${requestedPage}:${q}`;
+    if (key === loadedKey) return;
+    let cancelled = false;
+    setLoading(true);
+    getSoftwaresByCategory(categorySlug, { page: requestedPage, pageSize: PAGE_SIZE, q: q || undefined }).then(
+      (res) => {
+        if (cancelled) return;
+        if (res.success && res.data) setData(res.data as ListingData);
+        setCurrentPage(requestedPage);
+        setLoadedKey(key);
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [categorySlug, requestedPage, q, loadedKey]);
+
+  const qSuffix = q ? `&q=${encodeURIComponent(q)}` : "";
+
+  const handleSortChange = (newSort: SortValue) => {
+    router.replace(`/categories/${categorySlug}?sort=${newSort}${qSuffix}`, { scroll: false });
+  };
+
+  const handlePageChange = (targetPage: number) => {
+    router.replace(`/categories/${categorySlug}?sort=${sort}&page=${targetPage}${qSuffix}`, { scroll: false });
+  };
+
+  const hrefForPage = (targetPage: number): string | null => {
+    if (q === "" && sort === "rating" && targetPage <= staticPageLimit) {
+      return targetPage <= 1 ? `/categories/${categorySlug}` : `/categories/${categorySlug}/page/${targetPage}`;
+    }
+    return null;
+  };
+
+  const sortedSoftwares = q
+    ? data.softwares
+    : [...data.softwares].sort((a, b) => {
+        if (sort === "name") return (a.name || "").localeCompare(b.name || "");
+        if (sort === "newest") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (b.rating || 0) - (a.rating || 0);
+      });
+
+  return (
+    <>
+      {q && (
+        <p className="mb-4 inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
+          Showing results for <span className="text-primary-navy">&ldquo;{q}&rdquo;</span>
+          <Link href={`/categories/${categorySlug}`} className="text-brand-green-dark hover:underline">
+            Clear search
+          </Link>
+        </p>
+      )}
+
+      <div className="mb-6 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 flex items-center gap-1.5 text-xs font-bold text-zinc-500">
+          <ArrowDownUp size={13} className="text-brand-green-dark" />
+          Sort
+        </span>
+        {sortOptions.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleSortChange(opt.value)}
+            className={`rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${
+              sort === opt.value
+                ? "bg-brand-green/10 text-brand-green-dark"
+                : "border border-zinc-200 text-zinc-500 hover:bg-zinc-50"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-36 animate-pulse rounded-2xl border border-zinc-100 bg-zinc-50" />
+          ))}
+        </div>
+      ) : sortedSoftwares.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-16 text-center">
+          <Box size={28} className="mb-3 text-zinc-300" />
+          <h3 className="mb-1 text-base font-bold text-primary-navy">No softwares found</h3>
+          <p className="max-w-sm text-xs text-zinc-500">
+            We couldn't find any listings for this category. Browse other categories instead.
+          </p>
+          <Link
+            href="/categories"
+            className="mt-5 inline-flex items-center justify-center rounded-full bg-brand-green-light px-6 py-2.5 text-sm font-bold text-primary-navy shadow-sm transition-all hover:bg-brand-green hover:text-white"
+          >
+            Browse categories
+          </Link>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-4">
+            {sortedSoftwares.map((software, idx) => (
+              <div
+                key={software.id}
+                className="group flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-brand-green/40 hover:shadow-lg sm:flex-row sm:items-center"
+              >
+                <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-400 sm:flex">
+                  {(currentPage - 1) * PAGE_SIZE + idx + 1}
+                </span>
+
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50">
+                  {software.logo ? (
+                    <img src={software.logo} alt={software.name} className="h-full w-full object-contain p-2" />
+                  ) : (
+                    <span className="text-xl font-black text-primary-navy/25">{software.name?.charAt(0)}</span>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-bold text-primary-navy transition-colors group-hover:text-brand-green-dark">
+                      {software.name}
+                    </h3>
+                    <StarRating rating={software.rating || 0} />
+                    <span className="text-xs font-bold text-zinc-400">{(software.rating || 0).toFixed(1)}</span>
+                  </div>
+                  {software.introduction && (
+                    <p className="mt-1.5 line-clamp-2 max-w-2xl text-sm text-zinc-500">{software.introduction}</p>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link
+                    href={`/softwares/${software.slug}#reviews`}
+                    className="hidden items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-500 transition-colors hover:border-primary-navy hover:text-primary-navy sm:flex"
+                  >
+                    <MessageSquare size={13} />
+                    Reviews
+                  </Link>
+                  <Link
+                    href={`/softwares/${software.slug}`}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-primary-navy px-4 py-2 text-xs font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-green-dark"
+                  >
+                    View Profile
+                    <ArrowUpRight size={13} />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <CategoriesPagination
+            page={currentPage}
+            totalPages={data.totalPages}
+            hrefForPage={hrefForPage}
+            onPageChange={handlePageChange}
+          />
+        </>
+      )}
+    </>
+  );
+}
+```
+
+- [ ] **Step 5: Rewrite `app/categories/[category]/page.tsx`**
 
 ```tsx
 import type { Metadata } from "next";
@@ -611,14 +714,11 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string }>;
-  searchParams: Promise<{ q?: string }>;
 }): Promise<Metadata> {
   const { category } = await params;
-  const { q } = await searchParams;
-  const { listing } = await loadCategoryPage(category, 1, q?.trim() || "");
+  const { listing } = await loadCategoryPage(category, 1);
   const name = listing?.categoryName || category;
   return {
     title: `Best ${name} List | SoftwareDome`,
@@ -629,18 +729,15 @@ export async function generateMetadata({
 
 export default async function CategoryPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string }>;
-  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const { category } = await params;
-  const { sort, q } = await searchParams;
-  return <CategoryPageContent categorySlug={category} page={1} sort={sort} q={q} />;
+  return <CategoryPageContent categorySlug={category} page={1} />;
 }
 ```
 
-- [ ] **Step 4: Create `app/categories/[category]/page/[page]/page.tsx`**
+- [ ] **Step 6: Create `app/categories/[category]/page/[page]/page.tsx`**
 
 ```tsx
 import type { Metadata } from "next";
@@ -670,15 +767,12 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; page: string }>;
-  searchParams: Promise<{ q?: string }>;
 }): Promise<Metadata> {
   const { category, page } = await params;
-  const { q } = await searchParams;
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-  const { listing } = await loadCategoryPage(category, pageNum, q?.trim() || "");
+  const { listing } = await loadCategoryPage(category, pageNum);
   const name = listing?.categoryName || category;
   return {
     title: `Best ${name} List — Page ${pageNum} | SoftwareDome`,
@@ -689,34 +783,34 @@ export async function generateMetadata({
 
 export default async function CategoryPaginatedPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; page: string }>;
-  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const { category, page } = await params;
-  const { sort, q } = await searchParams;
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   if (pageNum === 1) {
-    const qp = new URLSearchParams();
-    if (sort) qp.set("sort", sort);
-    if (q) qp.set("q", q);
-    const qs = qp.toString() ? `?${qp.toString()}` : "";
-    redirect(`/categories/${category}${qs}`);
+    redirect(`/categories/${category}`);
   }
-  return <CategoryPageContent categorySlug={category} page={pageNum} sort={sort} q={q} />;
+  return <CategoryPageContent categorySlug={category} page={pageNum} />;
 }
 ```
 
-- [ ] **Step 5: Type-check**
+Note: this redirect no longer preserves `sort`/`q` query params (unlike the earlier version) — reading `searchParams` anywhere in this file, even only inside the `pageNum === 1` branch, would re-introduce the same whole-route dynamic-rendering problem this correction fixes. In practice this URL (`/page/1`) is never linked to with `sort`/`q` attached — `CategoryListingClient` only ever constructs `/page/N` links for `N >= 2` in the plain default view — so this is a defensive fallback for a stray direct hit, not a path real users take.
+
+- [ ] **Step 7: Type-check**
 
 Run: `npx tsc --noEmit`
-Expected: no errors in the four files touched this task.
+Expected: no errors in the files touched this task.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Verify the static/dynamic rendering mode directly** (this is the check the earlier version of this task was missing — `tsc` cannot catch a rendering-mode regression)
+
+Run: `npx next build` from the worktree root.
+Expected: the build's route table shows `/categories/[category]` and `/categories/[category]/page/[page]` marked as SSG (prerendered) — not `ƒ (Dynamic)` — and the "Generating static pages" step actually emits HTML for the currently-populated `emr-software` category (page 1, and page 2/3 if it has enough software for them).
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add app/categories/constants.ts app/categories/[category]/CategoryPageContent.tsx app/categories/[category]/page.tsx "app/categories/[category]/page/[page]/page.tsx"
+git add app/categories/constants.ts components/CategoriesPagination.tsx app/categories/[category]/CategoryPageContent.tsx app/categories/[category]/CategoryListingClient.tsx app/categories/[category]/page.tsx "app/categories/[category]/page/[page]/page.tsx"
 git commit -m "feat: statically pre-render category listing pages 1-3"
 ```
 
@@ -724,16 +818,20 @@ git commit -m "feat: statically pre-render category listing pages 1-3"
 
 ### Task 4: Static subcategory-level pages (1–3)
 
-Mirrors Task 3 one level deeper: `SubcategoryPageContent` plus `/categories/[category]/[subcategory]` (page 1) and `/categories/[category]/[subcategory]/page/[page]` (pages 2–3).
+Mirrors Task 3's (corrected) pattern one level deeper: `SubcategoryPageContent` (static, no `searchParams`) + `SubcategoryListingClient` (client, owns sort/search/pagination) plus `/categories/[category]/[subcategory]` (page 1) and `/categories/[category]/[subcategory]/page/[page]` (pages 2–3).
+
+**Same correction as Task 3 applies here from the start** (do not repeat Task 3's original mistake): the Server Component must never read `searchParams` — that opts the entire route into per-request dynamic rendering in this project's Next.js configuration (no `cacheComponents`/PPR), not just the individual request that happens to carry a query string. All sort/search/pagination interactivity lives in the client component instead, via the client-side `useSearchParams()` hook, which does not affect the route's static/dynamic classification.
 
 **Files:**
 - Create: `app/categories/[category]/[subcategory]/SubcategoryPageContent.tsx`
+- Create: `app/categories/[category]/[subcategory]/SubcategoryListingClient.tsx`
 - Modify: `app/categories/[category]/[subcategory]/page.tsx` (full rewrite)
 - Create: `app/categories/[category]/[subcategory]/page/[page]/page.tsx`
 
 **Interfaces:**
-- Consumes: `PAGE_SIZE`, `STATIC_PAGE_LIMIT` (Task 3); `getSoftwaresBySubcategory`, `getCategoryWithSubcategories` from `app/categories/actions.ts`; `StarRating`, `SiteHeader`, `CategoriesPagination` from Task 1.
-- Produces: `loadSubcategoryPage(categorySlug, subcategorySlug, page, q): Promise<{ listing: any; detail: any }>` and `SubcategoryPageContent({ categorySlug, subcategorySlug, page, sort?, q? })` default export — consumed only by the two route files in this task.
+- Consumes: `PAGE_SIZE`, `STATIC_PAGE_LIMIT` (Task 3); `getSoftwaresBySubcategory`, `getCategoryWithSubcategories` from `app/categories/actions.ts`; `StarRating`, `SiteHeader`, the revised `CategoriesPagination` (Task 1, extended in Task 3) from Task 1.
+- Produces: `loadSubcategoryPage(categorySlug, subcategorySlug, page): Promise<{ listing: any; detail: any }>` (no `q` — always the default view) and `SubcategoryPageContent({ categorySlug, subcategorySlug, page })` default export from `SubcategoryPageContent.tsx` — consumed by the two route files in this task.
+- Produces: `SubcategoryListingClient({ categorySlug, subcategorySlug, page, staticPageLimit, initialData })` default export — consumed only by `SubcategoryPageContent.tsx`.
 
 - [ ] **Step 1: Create `app/categories/[category]/[subcategory]/SubcategoryPageContent.tsx`**
 
@@ -743,82 +841,34 @@ import { cache } from "react";
 import Footer from "@/components/Footer";
 import Container from "@/components/Container";
 import SiteHeader from "@/components/SiteHeader";
-import CategoriesPagination from "@/components/CategoriesPagination";
-import StarRating from "@/components/StarRating";
-import { Box, Filter, ArrowDownUp, MessageSquare, ArrowUpRight } from "@/lib/fa-icons";
+import { Filter } from "@/lib/fa-icons";
 import { getSoftwaresBySubcategory, getCategoryWithSubcategories } from "@/app/categories/actions";
-import { PAGE_SIZE } from "@/app/categories/constants";
+import { PAGE_SIZE, STATIC_PAGE_LIMIT } from "@/app/categories/constants";
+import SubcategoryListingClient from "./SubcategoryListingClient";
 
-const sortOptions = [
-  { value: "rating", label: "Highest rated" },
-  { value: "newest", label: "Newest" },
-  { value: "name", label: "Name (A-Z)" },
-] as const;
-
-type SortValue = (typeof sortOptions)[number]["value"];
-
-export const loadSubcategoryPage = cache(
-  async (categorySlug: string, subcategorySlug: string, page: number, q: string) => {
-    const [listingRes, detailRes] = await Promise.all([
-      getSoftwaresBySubcategory(categorySlug, subcategorySlug, { page, pageSize: PAGE_SIZE, q: q || undefined }),
-      getCategoryWithSubcategories(categorySlug),
-    ]);
-    return {
-      listing: listingRes.success ? (listingRes.data as any) : null,
-      detail: detailRes.success ? (detailRes.data as any) : null,
-    };
-  }
-);
-
-function hrefForPage(
-  categorySlug: string,
-  subcategorySlug: string,
-  sort: string,
-  q: string,
-  targetPage: number
-): string {
-  const params = new URLSearchParams();
-  if (sort !== "rating") params.set("sort", sort);
-  if (q) params.set("q", q);
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  const base = `/categories/${categorySlug}/${subcategorySlug}`;
-  if (targetPage <= 1) return `${base}${suffix}`;
-  return `${base}/page/${targetPage}${suffix}`;
-}
+export const loadSubcategoryPage = cache(async (categorySlug: string, subcategorySlug: string, page: number) => {
+  const [listingRes, detailRes] = await Promise.all([
+    getSoftwaresBySubcategory(categorySlug, subcategorySlug, { page, pageSize: PAGE_SIZE }),
+    getCategoryWithSubcategories(categorySlug),
+  ]);
+  return {
+    listing: listingRes.success ? (listingRes.data as any) : null,
+    detail: detailRes.success ? (detailRes.data as any) : null,
+  };
+});
 
 export default async function SubcategoryPageContent({
   categorySlug,
   subcategorySlug,
   page,
-  sort: sortParam,
-  q,
 }: {
   categorySlug: string;
   subcategorySlug: string;
   page: number;
-  sort?: string;
-  q?: string;
 }) {
-  const sort: SortValue = sortParam === "newest" || sortParam === "name" ? sortParam : "rating";
-  const query = q?.trim() || "";
-  const { listing: data, detail: categoryDetail } = await loadSubcategoryPage(
-    categorySlug,
-    subcategorySlug,
-    page,
-    query
-  );
-
+  const { listing: data, detail: categoryDetail } = await loadSubcategoryPage(categorySlug, subcategorySlug, page);
   const subcategoryLabel = data?.subcategoryName || "Subcategory";
-
-  const sortedSoftwares = data
-    ? query
-      ? data.softwares
-      : [...data.softwares].sort((a: any, b: any) => {
-          if (sort === "name") return (a.name || "").localeCompare(b.name || "");
-          if (sort === "newest") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          return (b.rating || 0) - (a.rating || 0);
-        })
-    : [];
+  const staticPageLimit = data ? Math.min(STATIC_PAGE_LIMIT, data.totalPages) : STATIC_PAGE_LIMIT;
 
   return (
     <main className="min-h-screen bg-zinc-50/40">
@@ -848,17 +898,6 @@ export default async function SubcategoryPageContent({
               {data.total === 1 ? "" : "s"} and find the right fit for your team.
             </p>
           )}
-          {query && (
-            <p className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
-              Showing results for <span className="text-primary-navy">&ldquo;{query}&rdquo;</span>
-              <Link
-                href={`/categories/${categorySlug}/${subcategorySlug}`}
-                className="text-brand-green-dark hover:underline"
-              >
-                Clear search
-              </Link>
-            </p>
-          )}
         </Container>
       </section>
 
@@ -867,28 +906,6 @@ export default async function SubcategoryPageContent({
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-[260px_1fr]">
             <aside className="hidden lg:block">
               <div className="sticky top-24 space-y-6">
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5">
-                  <div className="mb-4 flex items-center gap-2 text-sm font-bold text-primary-navy">
-                    <ArrowDownUp size={14} className="text-brand-green-dark" />
-                    Sort by
-                  </div>
-                  <div className="space-y-1.5">
-                    {sortOptions.map((opt) => (
-                      <Link
-                        key={opt.value}
-                        href={hrefForPage(categorySlug, subcategorySlug, opt.value, query, 1)}
-                        className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
-                          sort === opt.value
-                            ? "bg-brand-green/10 text-brand-green-dark"
-                            : "text-zinc-600 hover:bg-zinc-50"
-                        }`}
-                      >
-                        {opt.label}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="rounded-2xl border border-zinc-200 bg-white p-5">
                   <div className="mb-4 flex items-center gap-2 text-sm font-bold text-primary-navy">
                     <Filter size={14} className="text-brand-green-dark" />
@@ -917,91 +934,17 @@ export default async function SubcategoryPageContent({
             </aside>
 
             <div>
-              {!data || sortedSoftwares.length === 0 ? (
-                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-16 text-center">
-                  <Box size={28} className="mb-3 text-zinc-300" />
-                  <h3 className="mb-1 text-base font-bold text-primary-navy">No softwares found</h3>
-                  <p className="max-w-sm text-xs text-zinc-500">
-                    We couldn't find any listings for this subcategory yet. Browse other subcategories
-                    instead.
-                  </p>
-                  <Link
-                    href={`/categories/${categorySlug}`}
-                    className="mt-5 inline-flex items-center justify-center rounded-full bg-brand-green-light px-6 py-2.5 text-sm font-bold text-primary-navy shadow-sm transition-all hover:bg-brand-green hover:text-white"
-                  >
-                    Browse {data?.categoryName || categoryDetail?.name || "category"}
-                  </Link>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-4">
-                    {sortedSoftwares.map((software: any, idx: number) => (
-                      <div
-                        key={software.id}
-                        className="group flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-brand-green/40 hover:shadow-lg sm:flex-row sm:items-center"
-                      >
-                        <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-400 sm:flex">
-                          {(page - 1) * PAGE_SIZE + idx + 1}
-                        </span>
-
-                        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50">
-                          {software.logo ? (
-                            <img
-                              src={software.logo}
-                              alt={software.name}
-                              className="h-full w-full object-contain p-2"
-                            />
-                          ) : (
-                            <span className="text-xl font-black text-primary-navy/25">
-                              {software.name?.charAt(0)}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-base font-bold text-primary-navy transition-colors group-hover:text-brand-green-dark">
-                              {software.name}
-                            </h3>
-                            <StarRating rating={software.rating || 0} />
-                            <span className="text-xs font-bold text-zinc-400">
-                              {(software.rating || 0).toFixed(1)}
-                            </span>
-                          </div>
-                          {software.introduction && (
-                            <p className="mt-1.5 line-clamp-2 max-w-2xl text-sm text-zinc-500">
-                              {software.introduction}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Link
-                            href={`/softwares/${software.slug}#reviews`}
-                            className="hidden items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-500 transition-colors hover:border-primary-navy hover:text-primary-navy sm:flex"
-                          >
-                            <MessageSquare size={13} />
-                            Reviews
-                          </Link>
-                          <Link
-                            href={`/softwares/${software.slug}`}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary-navy px-4 py-2 text-xs font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-green-dark"
-                          >
-                            View Profile
-                            <ArrowUpRight size={13} />
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <CategoriesPagination
-                    page={page}
-                    totalPages={data.totalPages}
-                    hrefForPage={(p) => hrefForPage(categorySlug, subcategorySlug, sort, query, p)}
-                  />
-                </>
-              )}
+              <SubcategoryListingClient
+                categorySlug={categorySlug}
+                subcategorySlug={subcategorySlug}
+                page={page}
+                staticPageLimit={staticPageLimit}
+                initialData={
+                  data
+                    ? { softwares: data.softwares, total: data.total, totalPages: data.totalPages }
+                    : { softwares: [], total: 0, totalPages: 1 }
+                }
+              />
 
               <div className="mt-12 overflow-hidden rounded-2xl bg-primary-navy px-8 py-10 text-center sm:px-12">
                 <h3 className="font-brand text-2xl font-bold text-white">
@@ -1029,7 +972,230 @@ export default async function SubcategoryPageContent({
 }
 ```
 
-- [ ] **Step 2: Rewrite `app/categories/[category]/[subcategory]/page.tsx`**
+- [ ] **Step 2: Create `app/categories/[category]/[subcategory]/SubcategoryListingClient.tsx`**
+
+```tsx
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import CategoriesPagination from "@/components/CategoriesPagination";
+import StarRating from "@/components/StarRating";
+import { Box, ArrowDownUp, MessageSquare, ArrowUpRight } from "@/lib/fa-icons";
+import { getSoftwaresBySubcategory } from "@/app/categories/actions";
+
+const PAGE_SIZE = 12;
+
+const sortOptions = [
+  { value: "rating", label: "Highest rated" },
+  { value: "newest", label: "Newest" },
+  { value: "name", label: "Name (A-Z)" },
+] as const;
+
+type SortValue = (typeof sortOptions)[number]["value"];
+
+type SoftwareItem = {
+  id: string;
+  name: string;
+  slug: string;
+  logo: string | null;
+  introduction: string | null;
+  rating: number | null;
+  createdAt: string;
+};
+
+type ListingData = { softwares: SoftwareItem[]; total: number; totalPages: number };
+
+export default function SubcategoryListingClient({
+  categorySlug,
+  subcategorySlug,
+  page,
+  staticPageLimit,
+  initialData,
+}: {
+  categorySlug: string;
+  subcategorySlug: string;
+  page: number;
+  staticPageLimit: number;
+  initialData: ListingData;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sort = (searchParams.get("sort") as SortValue) || "rating";
+  const q = searchParams.get("q") || "";
+  const requestedPage = parseInt(searchParams.get("page") || "", 10) || page;
+
+  const [loadedKey, setLoadedKey] = useState(`${page}:`);
+  const [currentPage, setCurrentPage] = useState(page);
+  const [data, setData] = useState<ListingData>(initialData);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const key = `${requestedPage}:${q}`;
+    if (key === loadedKey) return;
+    let cancelled = false;
+    setLoading(true);
+    getSoftwaresBySubcategory(categorySlug, subcategorySlug, {
+      page: requestedPage,
+      pageSize: PAGE_SIZE,
+      q: q || undefined,
+    }).then((res) => {
+      if (cancelled) return;
+      if (res.success && res.data) setData(res.data as ListingData);
+      setCurrentPage(requestedPage);
+      setLoadedKey(key);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [categorySlug, subcategorySlug, requestedPage, q, loadedKey]);
+
+  const qSuffix = q ? `&q=${encodeURIComponent(q)}` : "";
+  const basePath = `/categories/${categorySlug}/${subcategorySlug}`;
+
+  const handleSortChange = (newSort: SortValue) => {
+    router.replace(`${basePath}?sort=${newSort}${qSuffix}`, { scroll: false });
+  };
+
+  const handlePageChange = (targetPage: number) => {
+    router.replace(`${basePath}?sort=${sort}&page=${targetPage}${qSuffix}`, { scroll: false });
+  };
+
+  const hrefForPage = (targetPage: number): string | null => {
+    if (q === "" && sort === "rating" && targetPage <= staticPageLimit) {
+      return targetPage <= 1 ? basePath : `${basePath}/page/${targetPage}`;
+    }
+    return null;
+  };
+
+  const sortedSoftwares = q
+    ? data.softwares
+    : [...data.softwares].sort((a, b) => {
+        if (sort === "name") return (a.name || "").localeCompare(b.name || "");
+        if (sort === "newest") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (b.rating || 0) - (a.rating || 0);
+      });
+
+  return (
+    <>
+      {q && (
+        <p className="mb-4 inline-flex items-center gap-2 text-xs font-semibold text-zinc-500">
+          Showing results for <span className="text-primary-navy">&ldquo;{q}&rdquo;</span>
+          <Link href={basePath} className="text-brand-green-dark hover:underline">
+            Clear search
+          </Link>
+        </p>
+      )}
+
+      <div className="mb-6 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 flex items-center gap-1.5 text-xs font-bold text-zinc-500">
+          <ArrowDownUp size={13} className="text-brand-green-dark" />
+          Sort
+        </span>
+        {sortOptions.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleSortChange(opt.value)}
+            className={`rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${
+              sort === opt.value
+                ? "bg-brand-green/10 text-brand-green-dark"
+                : "border border-zinc-200 text-zinc-500 hover:bg-zinc-50"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-36 animate-pulse rounded-2xl border border-zinc-100 bg-zinc-50" />
+          ))}
+        </div>
+      ) : sortedSoftwares.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-16 text-center">
+          <Box size={28} className="mb-3 text-zinc-300" />
+          <h3 className="mb-1 text-base font-bold text-primary-navy">No softwares found</h3>
+          <p className="max-w-sm text-xs text-zinc-500">
+            We couldn't find any listings for this subcategory yet. Browse other subcategories instead.
+          </p>
+          <Link
+            href={`/categories/${categorySlug}`}
+            className="mt-5 inline-flex items-center justify-center rounded-full bg-brand-green-light px-6 py-2.5 text-sm font-bold text-primary-navy shadow-sm transition-all hover:bg-brand-green hover:text-white"
+          >
+            Browse category
+          </Link>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-4">
+            {sortedSoftwares.map((software, idx) => (
+              <div
+                key={software.id}
+                className="group flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-brand-green/40 hover:shadow-lg sm:flex-row sm:items-center"
+              >
+                <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-400 sm:flex">
+                  {(currentPage - 1) * PAGE_SIZE + idx + 1}
+                </span>
+
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50">
+                  {software.logo ? (
+                    <img src={software.logo} alt={software.name} className="h-full w-full object-contain p-2" />
+                  ) : (
+                    <span className="text-xl font-black text-primary-navy/25">{software.name?.charAt(0)}</span>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-bold text-primary-navy transition-colors group-hover:text-brand-green-dark">
+                      {software.name}
+                    </h3>
+                    <StarRating rating={software.rating || 0} />
+                    <span className="text-xs font-bold text-zinc-400">{(software.rating || 0).toFixed(1)}</span>
+                  </div>
+                  {software.introduction && (
+                    <p className="mt-1.5 line-clamp-2 max-w-2xl text-sm text-zinc-500">{software.introduction}</p>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link
+                    href={`/softwares/${software.slug}#reviews`}
+                    className="hidden items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-500 transition-colors hover:border-primary-navy hover:text-primary-navy sm:flex"
+                  >
+                    <MessageSquare size={13} />
+                    Reviews
+                  </Link>
+                  <Link
+                    href={`/softwares/${software.slug}`}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-primary-navy px-4 py-2 text-xs font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-green-dark"
+                  >
+                    View Profile
+                    <ArrowUpRight size={13} />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <CategoriesPagination
+            page={currentPage}
+            totalPages={data.totalPages}
+            hrefForPage={hrefForPage}
+            onPageChange={handlePageChange}
+          />
+        </>
+      )}
+    </>
+  );
+}
+```
+
+- [ ] **Step 3: Rewrite `app/categories/[category]/[subcategory]/page.tsx`**
 
 ```tsx
 import type { Metadata } from "next";
@@ -1046,14 +1212,11 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; subcategory: string }>;
-  searchParams: Promise<{ q?: string }>;
 }): Promise<Metadata> {
   const { category, subcategory } = await params;
-  const { q } = await searchParams;
-  const { listing } = await loadSubcategoryPage(category, subcategory, 1, q?.trim() || "");
+  const { listing } = await loadSubcategoryPage(category, subcategory, 1);
   const name = listing?.subcategoryName || subcategory;
   return {
     title: `Best ${name} List | SoftwareDome`,
@@ -1064,20 +1227,15 @@ export async function generateMetadata({
 
 export default async function SubcategoryPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; subcategory: string }>;
-  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const { category, subcategory } = await params;
-  const { sort, q } = await searchParams;
-  return (
-    <SubcategoryPageContent categorySlug={category} subcategorySlug={subcategory} page={1} sort={sort} q={q} />
-  );
+  return <SubcategoryPageContent categorySlug={category} subcategorySlug={subcategory} page={1} />;
 }
 ```
 
-- [ ] **Step 3: Create `app/categories/[category]/[subcategory]/page/[page]/page.tsx`**
+- [ ] **Step 4: Create `app/categories/[category]/[subcategory]/page/[page]/page.tsx`**
 
 ```tsx
 import type { Metadata } from "next";
@@ -1107,15 +1265,12 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; subcategory: string; page: string }>;
-  searchParams: Promise<{ q?: string }>;
 }): Promise<Metadata> {
   const { category, subcategory, page } = await params;
-  const { q } = await searchParams;
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-  const { listing } = await loadSubcategoryPage(category, subcategory, pageNum, q?.trim() || "");
+  const { listing } = await loadSubcategoryPage(category, subcategory, pageNum);
   const name = listing?.subcategoryName || subcategory;
   return {
     title: `Best ${name} List — Page ${pageNum} | SoftwareDome`,
@@ -1126,42 +1281,32 @@ export async function generateMetadata({
 
 export default async function SubcategoryPaginatedPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; subcategory: string; page: string }>;
-  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const { category, subcategory, page } = await params;
-  const { sort, q } = await searchParams;
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   if (pageNum === 1) {
-    const qp = new URLSearchParams();
-    if (sort) qp.set("sort", sort);
-    if (q) qp.set("q", q);
-    const qs = qp.toString() ? `?${qp.toString()}` : "";
-    redirect(`/categories/${category}/${subcategory}${qs}`);
+    redirect(`/categories/${category}/${subcategory}`);
   }
-  return (
-    <SubcategoryPageContent
-      categorySlug={category}
-      subcategorySlug={subcategory}
-      page={pageNum}
-      sort={sort}
-      q={q}
-    />
-  );
+  return <SubcategoryPageContent categorySlug={category} subcategorySlug={subcategory} page={pageNum} />;
 }
 ```
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 5: Type-check**
 
 Run: `npx tsc --noEmit`
-Expected: no errors in the three files touched this task.
+Expected: no errors in the files touched this task.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Verify the static/dynamic rendering mode directly**
+
+Run: `npx next build` from the worktree root.
+Expected: `/categories/[category]/[subcategory]` and its `/page/[page]` variant show as SSG (prerendered), not `ƒ (Dynamic)`, and the build emits HTML for the currently-populated `emr-software/general-emr-software` subcategory.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add "app/categories/[category]/[subcategory]/SubcategoryPageContent.tsx" "app/categories/[category]/[subcategory]/page.tsx" "app/categories/[category]/[subcategory]/page/[page]/page.tsx"
+git add "app/categories/[category]/[subcategory]/SubcategoryPageContent.tsx" "app/categories/[category]/[subcategory]/SubcategoryListingClient.tsx" "app/categories/[category]/[subcategory]/page.tsx" "app/categories/[category]/[subcategory]/page/[page]/page.tsx"
 git commit -m "feat: statically pre-render subcategory listing pages 1-3"
 ```
 
@@ -1579,10 +1724,10 @@ Expected: `rel="canonical" href="/categories/emr-software"`.
 Run: `curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" "http://localhost:3000/categories/emr-software?page=2"`
 Expected: `301` and a redirect URL ending in `/categories/emr-software/page/2`.
 
-- [ ] **Step 7: Verify search still returns live results**
+- [ ] **Step 7: Verify search still works**
 
 Run: `curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:3000/categories/emr-software?q=test"`
-Expected: `200` (dynamically rendered per-request; confirm no error in the terminal running `npm start`).
+Expected: `200` (this URL is served from the same static route — search only kicks in client-side via `CategoryListingClient`'s `useSearchParams()` after hydration, so curl alone cannot confirm filtered results). If you also have browser access, load that URL and confirm the list updates to filtered/live results shortly after the page loads (a brief flash of the unfiltered default list before the correction fetch resolves is expected and acceptable).
 
 - [ ] **Step 8: Verify the sitemap**
 
