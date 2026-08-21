@@ -25,15 +25,12 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; page: string }>;
-  searchParams: Promise<{ q?: string }>;
 }): Promise<Metadata> {
   const { category, page } = await params;
-  const { q } = await searchParams;
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-  const { listing } = await loadCategoryPage(category, pageNum, q?.trim() || "");
+  const { listing } = await loadCategoryPage(category, pageNum);
   const name = listing?.categoryName || category;
   return {
     title: `Best ${name} List — Page ${pageNum} | SoftwareDome`,
@@ -44,20 +41,13 @@ export async function generateMetadata({
 
 export default async function CategoryPaginatedPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string; page: string }>;
-  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const { category, page } = await params;
-  const { sort, q } = await searchParams;
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   if (pageNum === 1) {
-    const qp = new URLSearchParams();
-    if (sort) qp.set("sort", sort);
-    if (q) qp.set("q", q);
-    const qs = qp.toString() ? `?${qp.toString()}` : "";
-    redirect(`/categories/${category}${qs}`);
+    redirect(`/categories/${category}`);
   }
-  return <CategoryPageContent categorySlug={category} page={pageNum} sort={sort} q={q} />;
+  return <CategoryPageContent categorySlug={category} page={pageNum} />;
 }

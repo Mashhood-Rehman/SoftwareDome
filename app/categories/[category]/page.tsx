@@ -12,14 +12,11 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string }>;
-  searchParams: Promise<{ q?: string }>;
 }): Promise<Metadata> {
   const { category } = await params;
-  const { q } = await searchParams;
-  const { listing } = await loadCategoryPage(category, 1, q?.trim() || "");
+  const { listing } = await loadCategoryPage(category, 1);
   const name = listing?.categoryName || category;
   return {
     title: `Best ${name} List | SoftwareDome`,
@@ -30,12 +27,9 @@ export async function generateMetadata({
 
 export default async function CategoryPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ category: string }>;
-  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const { category } = await params;
-  const { sort, q } = await searchParams;
-  return <CategoryPageContent categorySlug={category} page={1} sort={sort} q={q} />;
+  return <CategoryPageContent categorySlug={category} page={1} />;
 }
