@@ -1,23 +1,17 @@
-"use client";
-
-import { useState, useEffect } from "react";
 import Link from "next/link";
-import Navbar from "@/components/Navbar";
-import Sidebar from "@/components/Sidebar";
+import type { Metadata } from "next";
+import SiteHeader from "@/components/SiteHeader";
 import Footer from "@/components/Footer";
 import Container from "@/components/Container";
 import { ChevronRight } from "@/lib/fa-icons";
 import * as Icons from "@/lib/fa-icons";
 import { getCategories } from "@/app/categories/actions";
 
-type Subcategory = { id: string; name: string; slug: string; isGeneral: boolean; count: number };
-type CategoryListItem = {
-  id: string;
-  name: string;
-  slug: string;
-  icon: string | null;
-  count: number;
-  subcategories: Subcategory[];
+export const metadata: Metadata = {
+  title: "Software Categories | SoftwareDome",
+  description:
+    "Browse every software category in the SoftwareDome directory, from broad platforms to specific industry and role niches.",
+  alternates: { canonical: "/categories" },
 };
 
 function CategoryIcon({ name }: { name: string | null }) {
@@ -25,24 +19,13 @@ function CategoryIcon({ name }: { name: string | null }) {
   return <IconComponent size={20} className="text-brand-green-dark" />;
 }
 
-export default function CategoriesPage() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [categories, setCategories] = useState<CategoryListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function load() {
-      const res = await getCategories();
-      if (res.success) setCategories((res.data as CategoryListItem[]) || []);
-      setLoading(false);
-    }
-    load();
-  }, []);
+export default async function CategoriesPage() {
+  const res = await getCategories();
+  const categories = res.success ? (res.data as any[]) : [];
 
   return (
     <main className="min-h-screen bg-white">
-      <Navbar onMenuClick={() => setIsMenuOpen(true)} />
-      <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
+      <SiteHeader />
 
       <section className="border-b border-zinc-100 bg-zinc-50/60 pb-12 pt-[120px] lg:pt-[140px]">
         <Container>
@@ -62,13 +45,7 @@ export default function CategoriesPage() {
 
       <section className="py-12">
         <Container>
-          {loading ? (
-            <div className="space-y-6">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-40 animate-pulse rounded-2xl border border-slate-100 bg-slate-50/60" />
-              ))}
-            </div>
-          ) : categories.length === 0 ? (
+          {categories.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-6 py-16 text-center">
               <Icons.Box size={28} className="mb-3 text-zinc-300" />
               <h3 className="text-base font-bold text-primary-navy">No categories yet</h3>
@@ -80,23 +57,28 @@ export default function CategoriesPage() {
             <div className="space-y-8">
               {categories.map((cat) => (
                 <div key={cat.id} id={cat.slug} className="rounded-2xl border border-slate-200 bg-white p-6">
-                  <div className="mb-5 flex items-center gap-3">
+                  <Link href={`/categories/${cat.slug}`} className="group mb-5 flex items-center gap-3">
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-green/10">
                       <CategoryIcon name={cat.icon} />
                     </span>
-                    <h2 className="font-brand text-lg font-bold text-primary-navy">{cat.name}</h2>
-                  </div>
+                    <h2 className="font-brand text-lg font-bold text-primary-navy group-hover:text-brand-green-dark">
+                      {cat.name}
+                    </h2>
+                  </Link>
                   <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                     {cat.subcategories
-                      .filter((s) => !s.isGeneral)
-                      .map((sub) => (
+                      .filter((s: any) => !s.isGeneral)
+                      .map((sub: any) => (
                         <Link
                           key={sub.id}
                           href={`/categories/${cat.slug}/${sub.slug}`}
                           className="group flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-primary-navy/80 transition-colors hover:bg-brand-green/5 hover:text-brand-green-dark"
                         >
                           <span className="truncate">{sub.name}</span>
-                          <ChevronRight size={13} className="shrink-0 text-zinc-300 group-hover:text-brand-green-dark" />
+                          <ChevronRight
+                            size={13}
+                            className="shrink-0 text-zinc-300 group-hover:text-brand-green-dark"
+                          />
                         </Link>
                       ))}
                   </div>
