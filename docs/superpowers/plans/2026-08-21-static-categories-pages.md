@@ -481,11 +481,13 @@ export default async function CategoryPageContent({
 
 - [ ] **Step 4: Create `app/categories/[category]/CategoryListingClient.tsx`**
 
+> **Correction (discovered in Task 3's fix-round re-review — read before implementing):** do not use Next's `useSearchParams()` hook here. Next requires any `useSearchParams()` consumer to sit inside a `<Suspense>` boundary to be prerenderable — but in static rendering, the Suspense **fallback** (not the real component) is what ships in the actual static HTML; the real content only appears after client-side hydration. That would mean the "static" pages contain a loading skeleton, not the real listing, for crawlers and no-JS clients — defeating this whole task's purpose. Instead, read the URL's `sort`/`q`/`page` exactly once, on mount, via the plain browser API `new URLSearchParams(window.location.search)` inside a `useEffect(() => {...}, [])` — this is invisible to Next's static-analysis machinery (it isn't a Next "Dynamic API"), so no Suspense boundary is needed, and the component's first render (used for both the static HTML and initial hydration) shows the real `initialData`. All subsequent sort/page changes are driven directly by this component's own handlers (which already know the new value) — there's no need to reactively re-read the URL after the initial mount.
+
 ```tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CategoriesPagination from "@/components/CategoriesPagination";
 import StarRating from "@/components/StarRating";
@@ -526,43 +528,59 @@ export default function CategoryListingClient({
   initialData: ListingData;
 }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const sort = (searchParams.get("sort") as SortValue) || "rating";
-  const q = searchParams.get("q") || "";
-  const requestedPage = parseInt(searchParams.get("page") || "", 10) || page;
 
-  const [loadedKey, setLoadedKey] = useState(`${page}:`);
+  const [sort, setSort] = useState<SortValue>("rating");
+  const [q, setQ] = useState("");
   const [currentPage, setCurrentPage] = useState(page);
   const [data, setData] = useState<ListingData>(initialData);
   const [loading, setLoading] = useState(false);
 
+  const fetchAndApply = useCallback(
+    (targetPage: number, targetQ: string) => {
+      setLoading(true);
+      getSoftwaresByCategory(categorySlug, { page: targetPage, pageSize: PAGE_SIZE, q: targetQ || undefined }).then(
+        (res) => {
+          if (res.success && res.data) setData(res.data as ListingData);
+          setCurrentPage(targetPage);
+          setLoading(false);
+        }
+      );
+    },
+    [categorySlug]
+  );
+
+  // One-time correction on mount: someone may have landed on this exact URL
+  // with ?sort=/?q=/?page= that the static shell (always rendered with the
+  // default view) doesn't reflect yet. Read via a plain browser API, never
+  // Next's useSearchParams — see the note above this code block for why.
   useEffect(() => {
-    const key = `${requestedPage}:${q}`;
-    if (key === loadedKey) return;
-    let cancelled = false;
-    setLoading(true);
-    getSoftwaresByCategory(categorySlug, { page: requestedPage, pageSize: PAGE_SIZE, q: q || undefined }).then(
-      (res) => {
-        if (cancelled) return;
-        if (res.success && res.data) setData(res.data as ListingData);
-        setCurrentPage(requestedPage);
-        setLoadedKey(key);
-        setLoading(false);
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [categorySlug, requestedPage, q, loadedKey]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlSort = (urlParams.get("sort") as SortValue) || "rating";
+    const urlQ = urlParams.get("q") || "";
+    const urlPage = parseInt(urlParams.get("page") || "", 10) || page;
+
+    setSort(urlSort);
+    setQ(urlQ);
+
+    if (urlQ !== "" || urlPage !== page) {
+      fetchAndApply(urlPage, urlQ);
+    }
+    // Deliberately empty deps: this reads the URL exactly once, on mount.
+    // Every change after that is driven by this component's own handlers
+    // below, which already know the new value directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const qSuffix = q ? `&q=${encodeURIComponent(q)}` : "";
 
   const handleSortChange = (newSort: SortValue) => {
+    setSort(newSort);
     router.replace(`/categories/${categorySlug}?sort=${newSort}${qSuffix}`, { scroll: false });
   };
 
   const handlePageChange = (targetPage: number) => {
     router.replace(`/categories/${categorySlug}?sort=${sort}&page=${targetPage}${qSuffix}`, { scroll: false });
+    fetchAndApply(targetPage, q);
   };
 
   const hrefForPage = (targetPage: number): string | null => {
@@ -802,10 +820,12 @@ Note: this redirect no longer preserves `sort`/`q` query params (unlike the earl
 Run: `npx tsc --noEmit`
 Expected: no errors in the files touched this task.
 
-- [ ] **Step 8: Verify the static/dynamic rendering mode directly** (this is the check the earlier version of this task was missing — `tsc` cannot catch a rendering-mode regression)
+- [ ] **Step 8: Verify the static/dynamic rendering mode — AND the actual HTML content, not just the route-table marker**
 
 Run: `npx next build` from the worktree root.
-Expected: the build's route table shows `/categories/[category]` and `/categories/[category]/page/[page]` marked as SSG (prerendered) — not `ƒ (Dynamic)` — and the "Generating static pages" step actually emits HTML for the currently-populated `emr-software` category (page 1, and page 2/3 if it has enough software for them).
+Expected: the build's route table shows `/categories/[category]` and `/categories/[category]/page/[page]` marked as SSG (prerendered) — not `ƒ (Dynamic)`.
+
+This alone is not sufficient — a static route can still ship an empty skeleton if a Suspense fallback is substituted in (that's exactly what went wrong in this task's own fix-round history). After the build, run `npx next start` and `curl -s http://localhost:3000/categories/emr-software`, then check the output actually contains a real software name from the `emr-software` category (not just five `animate-pulse` skeleton divs and no software data). If you see the skeleton markup instead of real names/ratings, the static HTML is not actually carrying real content — stop and report this as a concern rather than treating a green route-table marker as sufficient.
 
 - [ ] **Step 9: Commit**
 
@@ -974,11 +994,13 @@ export default async function SubcategoryPageContent({
 
 - [ ] **Step 2: Create `app/categories/[category]/[subcategory]/SubcategoryListingClient.tsx`**
 
+> **Same correction as Task 3's `CategoryListingClient` (read that task's Step 4 note if you haven't):** do not use `useSearchParams()`. Read the URL once on mount via `new URLSearchParams(window.location.search)` instead — using `useSearchParams()` here would force a `<Suspense>` boundary, and in static rendering the Suspense fallback (not real content) is what ships in the static HTML, which would silently break this task's whole purpose the same way it did in Task 3's first fix attempt.
+
 ```tsx
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CategoriesPagination from "@/components/CategoriesPagination";
 import StarRating from "@/components/StarRating";
@@ -1021,46 +1043,55 @@ export default function SubcategoryListingClient({
   initialData: ListingData;
 }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const sort = (searchParams.get("sort") as SortValue) || "rating";
-  const q = searchParams.get("q") || "";
-  const requestedPage = parseInt(searchParams.get("page") || "", 10) || page;
 
-  const [loadedKey, setLoadedKey] = useState(`${page}:`);
+  const [sort, setSort] = useState<SortValue>("rating");
+  const [q, setQ] = useState("");
   const [currentPage, setCurrentPage] = useState(page);
   const [data, setData] = useState<ListingData>(initialData);
   const [loading, setLoading] = useState(false);
 
+  const fetchAndApply = useCallback(
+    (targetPage: number, targetQ: string) => {
+      setLoading(true);
+      getSoftwaresBySubcategory(categorySlug, subcategorySlug, {
+        page: targetPage,
+        pageSize: PAGE_SIZE,
+        q: targetQ || undefined,
+      }).then((res) => {
+        if (res.success && res.data) setData(res.data as ListingData);
+        setCurrentPage(targetPage);
+        setLoading(false);
+      });
+    },
+    [categorySlug, subcategorySlug]
+  );
+
   useEffect(() => {
-    const key = `${requestedPage}:${q}`;
-    if (key === loadedKey) return;
-    let cancelled = false;
-    setLoading(true);
-    getSoftwaresBySubcategory(categorySlug, subcategorySlug, {
-      page: requestedPage,
-      pageSize: PAGE_SIZE,
-      q: q || undefined,
-    }).then((res) => {
-      if (cancelled) return;
-      if (res.success && res.data) setData(res.data as ListingData);
-      setCurrentPage(requestedPage);
-      setLoadedKey(key);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [categorySlug, subcategorySlug, requestedPage, q, loadedKey]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlSort = (urlParams.get("sort") as SortValue) || "rating";
+    const urlQ = urlParams.get("q") || "";
+    const urlPage = parseInt(urlParams.get("page") || "", 10) || page;
+
+    setSort(urlSort);
+    setQ(urlQ);
+
+    if (urlQ !== "" || urlPage !== page) {
+      fetchAndApply(urlPage, urlQ);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const qSuffix = q ? `&q=${encodeURIComponent(q)}` : "";
   const basePath = `/categories/${categorySlug}/${subcategorySlug}`;
 
   const handleSortChange = (newSort: SortValue) => {
+    setSort(newSort);
     router.replace(`${basePath}?sort=${newSort}${qSuffix}`, { scroll: false });
   };
 
   const handlePageChange = (targetPage: number) => {
     router.replace(`${basePath}?sort=${sort}&page=${targetPage}${qSuffix}`, { scroll: false });
+    fetchAndApply(targetPage, q);
   };
 
   const hrefForPage = (targetPage: number): string | null => {
@@ -1298,10 +1329,10 @@ export default async function SubcategoryPaginatedPage({
 Run: `npx tsc --noEmit`
 Expected: no errors in the files touched this task.
 
-- [ ] **Step 6: Verify the static/dynamic rendering mode directly**
+- [ ] **Step 6: Verify the static/dynamic rendering mode — AND the actual HTML content**
 
 Run: `npx next build` from the worktree root.
-Expected: `/categories/[category]/[subcategory]` and its `/page/[page]` variant show as SSG (prerendered), not `ƒ (Dynamic)`, and the build emits HTML for the currently-populated `emr-software/general-emr-software` subcategory.
+Expected: `/categories/[category]/[subcategory]` and its `/page/[page]` variant show as SSG (prerendered), not `ƒ (Dynamic)`. Then run `npx next start` and `curl -s http://localhost:3000/categories/emr-software/general-emr-software`, and confirm the output contains real software names/ratings, not just skeleton placeholder markup — a green SSG marker alone doesn't prove real content shipped (see Task 3's Step 8 for why).
 
 - [ ] **Step 7: Commit**
 
