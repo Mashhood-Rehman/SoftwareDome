@@ -206,16 +206,18 @@ function AuthContent() {
     setError(null);
     try {
       const email = otpType === 'login' ? signInEmail : form.email;
-      await fetch('/api/auth/send-otp', {
+      const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, type: otpType }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to resend code.');
       setResendCooldown(30);
       setOtp(['', '', '', '', '', '']);
       otpRefs.current[0]?.focus();
-    } catch {
-      setError('Failed to resend code. Try again.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to resend code. Try again.');
     } finally {
       setLoading(false);
     }

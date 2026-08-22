@@ -38,10 +38,13 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateLim
   return { allowed: true };
 }
 
-export function getClientIp(req: Request): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
+export function getClientIp(req: Request): string | null {
   const realIp = req.headers.get("x-real-ip");
   if (realIp) return realIp.trim();
-  return "unknown";
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const parts = forwarded.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return null;
 }

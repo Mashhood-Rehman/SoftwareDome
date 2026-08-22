@@ -5,6 +5,23 @@ import { isBusinessEmail } from "@/lib/auth-utils";
 import { requireAdmin } from "@/lib/require-admin";
 import bcrypt from "bcryptjs";
 
+const USER_SAFE_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  image: true,
+  role: true,
+  status: true,
+  isEmailVerified: true,
+  organizationId: true,
+  companyName: true,
+  companyEmail: true,
+  companyAddress: true,
+  companyPhone: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 export async function getUsers() {
   try {
     const auth = await requireAdmin();
@@ -90,22 +107,7 @@ export async function createUser(formData: {
         companyAddress: role === "VENDOR" ? companyAddress : null,
         companyPhone: role === "VENDOR" ? companyPhone : null,
       },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        image: true,
-        role: true,
-        status: true,
-        isEmailVerified: true,
-        organizationId: true,
-        companyName: true,
-        companyEmail: true,
-        companyAddress: true,
-        companyPhone: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: USER_SAFE_SELECT,
     });
 
     return { success: true, data: newUser, tempPassword };
@@ -132,6 +134,7 @@ export async function updateUser(
     const updated = await prisma.user.update({
       where: { id },
       data: { name, role: role as any },
+      select: USER_SAFE_SELECT,
     });
 
     return { success: true, data: updated };
@@ -152,6 +155,7 @@ export async function setUserStatus(id: string, status: "Active" | "Suspended") 
     const updated = await prisma.user.update({
       where: { id },
       data: { status },
+      select: USER_SAFE_SELECT,
     });
     return { success: true, data: updated };
   } catch (error) {

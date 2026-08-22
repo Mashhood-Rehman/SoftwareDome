@@ -29,12 +29,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const ipLimit = rateLimit(`otp-verify:ip:${ip}`, 20, 10 * 60 * 1000);
-    if (!ipLimit.allowed) {
-      return NextResponse.json(
-        { error: `Too many attempts from this network. Try again in ${ipLimit.retryAfterSeconds}s.` },
-        { status: 429 }
-      );
+    if (ip) {
+      const ipLimit = rateLimit(`otp-verify:ip:${ip}`, 20, 10 * 60 * 1000);
+      if (!ipLimit.allowed) {
+        return NextResponse.json(
+          { error: `Too many attempts from this network. Try again in ${ipLimit.retryAfterSeconds}s.` },
+          { status: 429 }
+        );
+      }
     }
 
     // 2. Verify OTP

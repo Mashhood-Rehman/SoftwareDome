@@ -23,12 +23,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const ipLimit = rateLimit(`send-otp:ip:${ip}`, 10, 10 * 60 * 1000);
-    if (!ipLimit.allowed) {
-      return NextResponse.json(
-        { error: `Too many OTP requests from this network. Try again in ${ipLimit.retryAfterSeconds}s.` },
-        { status: 429 }
-      );
+    if (ip) {
+      const ipLimit = rateLimit(`send-otp:ip:${ip}`, 10, 10 * 60 * 1000);
+      if (!ipLimit.allowed) {
+        return NextResponse.json(
+          { error: `Too many OTP requests from this network. Try again in ${ipLimit.retryAfterSeconds}s.` },
+          { status: 429 }
+        );
+      }
     }
 
     // 1. Business Email Validation
