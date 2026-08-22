@@ -3,6 +3,7 @@ import { isBusinessEmail } from "@/lib/auth-utils";
 import crypto from "crypto";
 import prisma from "@/lib/prisma";
 import { sendOTPEmail } from "@/lib/mail";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
   try {
@@ -10,6 +11,24 @@ export async function POST(req: Request) {
 
     if (!email) {
       return NextResponse.json({ error: "Email is required." }, { status: 400 });
+    }
+
+    const ip = getClientIp(req);
+    const emailKey = `send-otp:email:${email.toLowerCase()}`;
+    const emailLimit = rateLimit(emailKey, 3, 10 * 60 * 1000);
+    if (!emailLimit.allowed) {
+      return NextResponse.json(
+        { error: `Too many OTP requests for this email. Try again in ${emailLimit.retryAfterSeconds}s.` },
+        { status: 429 }
+      );
+    }
+
+    const ipLimit = rateLimit(`send-otp:ip:${ip}`, 10, 10 * 60 * 1000);
+    if (!ipLimit.allowed) {
+      return NextResponse.json(
+        { error: `Too many OTP requests from this network. Try again in ${ipLimit.retryAfterSeconds}s.` },
+        { status: 429 }
+      );
     }
 
     // 1. Business Email Validation
