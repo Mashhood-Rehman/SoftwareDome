@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
-
-const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "fallback-secret-at-least-32-chars-long"
-);
+import { JWT_SECRET_BYTES } from "@/lib/jwt-secret";
 
 const ADMIN_ONLY_PREFIXES = [
   "/dashboard/users",
@@ -12,7 +9,7 @@ const ADMIN_ONLY_PREFIXES = [
   "/dashboard/settings",
 ];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname.startsWith("/dashboard")) {
@@ -23,7 +20,7 @@ export async function middleware(request: NextRequest) {
     }
 
     try {
-      const { payload } = await jwtVerify(token, secret);
+      const { payload } = await jwtVerify(token, JWT_SECRET_BYTES);
       const role = payload.role as string;
 
       if (role !== "ADMIN" && role !== "VENDOR") {
