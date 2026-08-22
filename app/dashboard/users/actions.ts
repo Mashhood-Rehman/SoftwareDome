@@ -90,6 +90,22 @@ export async function createUser(formData: {
         companyAddress: role === "VENDOR" ? companyAddress : null,
         companyPhone: role === "VENDOR" ? companyPhone : null,
       },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        image: true,
+        role: true,
+        status: true,
+        isEmailVerified: true,
+        organizationId: true,
+        companyName: true,
+        companyEmail: true,
+        companyAddress: true,
+        companyPhone: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     return { success: true, data: newUser, tempPassword };
