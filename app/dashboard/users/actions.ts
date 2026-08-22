@@ -11,8 +11,22 @@ export async function getUsers() {
     if (auth.error) return { success: false, error: "Admin access required." };
 
     const users = await prisma.user.findMany({
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        image: true,
+        role: true,
+        status: true,
+        isEmailVerified: true,
+        organizationId: true,
         organization: true,
+        companyName: true,
+        companyEmail: true,
+        companyAddress: true,
+        companyPhone: true,
+        createdAt: true,
+        updatedAt: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -78,9 +92,7 @@ export async function createUser(formData: {
       },
     });
 
-    console.log(`User created: ${newUser.email}. Temp password: ${tempPassword}`);
-
-    return { success: true, data: newUser };
+    return { success: true, data: newUser, tempPassword };
   } catch (error) {
     console.error("Error creating user:", error);
     return { success: false, error: "Failed to create user" };

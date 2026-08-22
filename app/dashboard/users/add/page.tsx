@@ -67,7 +67,7 @@ export default function AddUserPage() {
     try {
       const result = await createUser(formData);
       if (result.success) {
-        show("User created successfully.", "success");
+        show(`User created. Temporary password: ${result.tempPassword}`, "success");
         router.push("/dashboard/users");
       } else {
         setFormError(result.error || "Failed to create user");
