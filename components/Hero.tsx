@@ -68,7 +68,7 @@ export default function Hero({ softwares }: { softwares?: SoftwareForCard[] }) {
           >
             Find the right <span className="text-[#5FC24A]">software</span>
             <br />
-            from 100s of vendors
+            from 1000s of vendors
           </h1>
 
           {/* Sub-headline */}

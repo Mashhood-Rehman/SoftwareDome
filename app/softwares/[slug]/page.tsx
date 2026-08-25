@@ -176,7 +176,6 @@ export default function SoftwareDetailPage() {
   const [activeDeepDiveId, setActiveDeepDiveId] = useState("");
   const [demoModalOpen, setDemoModalOpen] = useState(false);
   const [heroVisible, setHeroVisible] = useState(true);
-  const [scrollProgress, setScrollProgress] = useState(0);
   const heroRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -259,19 +258,6 @@ export default function SoftwareDetailPage() {
     return () => observer.disconnect();
   }, [software]);
 
-  // Reading progress — thin bar under the navbar tracking scroll position.
-  useEffect(() => {
-    if (!software) return;
-    function onScroll() {
-      const doc = document.documentElement;
-      const max = doc.scrollHeight - doc.clientHeight;
-      setScrollProgress(max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0);
-    }
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [software]);
-
   // Lightbox keyboard controls (Escape to close, arrows to navigate).
   useEffect(() => {
     if (!lightboxOpen) return;
@@ -346,14 +332,6 @@ export default function SoftwareDetailPage() {
 
   return (
     <main className="min-h-screen bg-surface-muted">
-      {/* Reading progress */}
-      <div className="fixed inset-x-0 top-0 z-[60] h-[3px]" aria-hidden>
-        <div
-          className="h-full bg-brand-green transition-[width] duration-150 ease-out"
-          style={{ width: `${scrollProgress * 100}%` }}
-        />
-      </div>
-
       <Navbar onMenuClick={() => setIsMenuOpen(true)} />
       <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
 

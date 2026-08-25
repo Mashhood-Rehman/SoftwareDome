@@ -220,7 +220,7 @@ export default function VendorsOrbitSection({
             }}
           >
             <Link
-              href="/softwares"
+              href="/categories"
               className="relative flex flex-row items-center justify-center overflow-hidden"
               style={{
                 width: "217px",

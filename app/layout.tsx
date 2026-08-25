@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Sora, Plus_Jakarta_Sans } from "next/font/google";
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import "./globals.css";
+import TopProgressBar from "@/components/TopProgressBar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -49,7 +50,10 @@ export default function RootLayout({
         <link rel="preconnect" href="https://res.cloudinary.com" />
         <link rel="dns-prefetch" href="https://res.cloudinary.com" />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <TopProgressBar />
+        {children}
+      </body>
     </html>
   );
 }
